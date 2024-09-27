@@ -60,18 +60,23 @@ class BookController extends AbstractController
     #[Route('/api/books', name: 'books', methods: ['GET'])]
     public function getAllBooks(BookRepository $bookRepository, SerializerInterface $serializer, Request $request, TagAwareCacheInterface $cache): JsonResponse
     {
-        $page = $request->get('page', 1);
+        $page = $request->get('page');
         $limit = $request->get('limit', 3);
-        $idCache = "getAllBooks-" . $page . "-" . $limit;
-
-        $jsonBookList = $cache->get($idCache, function (ItemInterface $item) use ($bookRepository, $page, $limit, $serializer) {
-            $item->tag("booksCache");
-            $item->expiresAfter(60);
-            $bookList = $bookRepository->findAllWithPagination($page, $limit);
-            $context = SerializationContext::create()->setGroups(['getBooks']);
-            $context->setVersion('1.0');
-            return $serializer->serialize($bookList, 'json', $context);
-        });
+        $idCache = "getAllBooks-" . $page . "-" . $limit; // on crée un identifiant pour le cache
+            if($page){
+                $jsonBookList = $cache->get($idCache, function (ItemInterface $item) use ($bookRepository, $page, $limit, $serializer) { // on recupere les données avec pagination
+                    $item->tag("booksCache"); // on ajoute un tag au cache
+                    $item->expiresAfter(60); // on défini le temps d'expiration du cache
+                    $bookList = $bookRepository->findAllWithPagination($page, $limit);
+                    $context = SerializationContext::create()->setGroups(['getBooks']); // on crée un contexte pour le serialization
+                    $context->setVersion('2.0'); // on défini la version du contexte
+                    return $serializer->serialize($bookList, 'json', $context); // on serialise le tableau de données
+                });
+            } else {
+                $context = SerializationContext::create()->setGroups(['getBooks']);
+                $context->setVersion('2.0');
+                $jsonBookList = $serializer->serialize($bookRepository->findAll(), 'json', $context);
+            }
 
         return new JsonResponse($jsonBookList, Response::HTTP_OK, [], true);
     }
@@ -170,12 +175,14 @@ class BookController extends AbstractController
         if ($errors->count() > 0) {
             return new JsonResponse($serializer->serialize($errors, 'json'), JsonResponse::HTTP_BAD_REQUEST, [], true);
         }
-        $em->persist($book);
-        $em->flush();
 
         $content = $request->toArray();
         $idAuthor = $content['idAuthor'] ?? -1;
         $book->setAuthor($authorRepository->find($idAuthor));
+
+        
+        $em->persist($book);
+        $em->flush();
 
         $context = SerializationContext::create()->setGroups(['getBooks']);
         $jsonBook = $serializer->serialize($book, 'json', $context);
